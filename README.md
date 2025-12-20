@@ -25,6 +25,8 @@ Key features:
 
 ## Installation
 
+[![Install UniversalGPT](https://img.shields.io/badge/Install-UniversalGPT-blue?style=for-the-badge&logo=tampermonkey)](https://cdn.jsdelivr.net/gh/Processori7/universalGPT@main/greasemonkey/universalgpt.user.js)
+
 1. Install a userscript manager (Tampermonkey, ScriptCat, Violentmonkey, etc.)
 2. Install the userscript file located at `greasemonkey/universalgpt.user.js` (or install the `userscript` from the release if available)
 3. Open your search engine, and the UniversalGPT panel will show on the right
