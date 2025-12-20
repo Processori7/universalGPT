@@ -148,7 +148,7 @@
 // @description:zu         Yengeza izimpendulo ze-AI ku-DuckDuckGo (inikwa amandla yi-GPT-4o!)
 // @author                 Processor
 // @namespace              https://github.com/Processori7
-// @version                2025.12.16
+// @version                2025.12.20
 // @license                MIT
 // @icon                   https://assets.ddgpt.com/images/icons/app/icon48.png?v=533ce0f
 // @icon64                 https://assets.ddgpt.com/images/icons/app/icon64.png?v=533ce0f
@@ -366,11 +366,63 @@ if (window !== window.top) return;
     
     const currentSite = siteConfig[app.site] || siteConfig.yandex
     
+    // Define app.centerCol for prompts library compatibility (summarizeResults)
+    // This is the element containing search results text
+    Object.defineProperty(app, 'centerCol', {
+        get() {
+            const selectors = {
+                yandex: '.serp-list, .content__left, .main__content',
+                duckduckgo: '[data-area*=mainline], .results--main',
+                brave: '#results, .results',
+                google: '#center_col, #rso, .main',
+                bing: '#b_results, .b_content',
+                rambler: '.search-results, .serp__results',
+                mailru: '.serp__results, .result__content',
+                yahoo: '#web, .searchCenterMiddle',
+                ecosia: '.mainline, .results',
+                startpage: '.mainline-results, .w-gl'
+            }
+            const siteSelectors = selectors[app.site] || 'body'
+            for (const selector of siteSelectors.split(', ')) {
+                const elem = document.querySelector(selector)
+                if (elem && elem.innerText && elem.innerText.trim()) return elem
+            }
+            return document.body // fallback
+        }
+    })
+    
+    // Skip on non-search pages like images, news, videos, etc.
+    const nonSearchPaths = ['images', 'news', 'videos', 'maps', 'shopping', 'books', 'flights', 'finance'];
+    if (nonSearchPaths.some(path => location.pathname.includes(path))) {
+        return;
+    }
+    
+    // Skip on non-search pages for DuckDuckGo based on params
+    if (app.site === 'duckduckgo') {
+        const params = new URL(location.href).searchParams;
+        if (params.get('ia') && ['images', 'news', 'videos', 'shopping', 'maps'].includes(params.get('ia'))) {
+            return;
+        }
+    }
+    
     // Skip showing on DuckDuckGo AI Chat page
     if (app.site === 'duckduckgo') {
         const urlParams = new URL(location.href).searchParams;
         if (urlParams.get('ia') === 'chat' && urlParams.get('duckai') === '1') {
             return; // Do not show on DuckDuckGo AI Chat page
+        }
+    }
+    
+    // Skip on non-search pages for Mail.ru based on params
+    if (app.site === 'mailru') {
+        const params = new URL(location.href).searchParams;
+        const type = params.get('type');
+        if (type && ['images', 'videos', 'news'].includes(type)) {
+            return;
+        }
+        const serpPath = decodeURIComponent(params.get('serp_path') || '');
+        if (serpPath.includes('/images/') || serpPath.includes('/videos/') || serpPath.includes('/news/')) {
+            return;
         }
     }
     
@@ -446,7 +498,7 @@ if (window !== window.top) return;
         autoGet: { type: 'toggle', icon: 'speechBalloonLasso', defaultVal: true,
             label: app.msgs.menuLabel_autoAnswer,
             helptip: app.msgs.helptip_autoGetAnswers },
-        autoSummarize: { type: 'toggle', icon: 'summarize', defaultVal: false,
+        autoSummarize: { type: 'toggle', icon: 'summarize', defaultVal: true,
             label: app.msgs.menuLabel_autoSummarizeResults,
             helptip: app.msgs.helptip_autoSummarizeResults },
         autoFocusChatbarDisabled: { type: 'toggle', mobile: false, icon: 'caretsInward', defaultVal: true,
@@ -470,7 +522,7 @@ if (window !== window.top) return;
         stickySidebar: { type: 'toggle', mobile: false, centered: false, icon: 'sidebar', defaultVal: false,
             label: app.msgs.menuLabel_stickySidebar,
             helptip: app.msgs.helptip_stickySidebar },
-        anchored: { type: 'toggle', mobile: false, centered: false, icon: 'anchor', defaultVal: false,
+        anchored: { type: 'toggle', mobile: false, centered: true, icon: 'anchor', defaultVal: true,
             label: app.msgs.mode_anchor,
             helptip: app.msgs.helptip_anchorMode },
         bgAnimationsDisabled: { type: 'toggle', icon: 'sparkles', defaultVal: false,
@@ -488,6 +540,9 @@ if (window !== window.top) return;
         debugMode: { type: 'toggle', icon: 'bug', defaultVal: false,
             label: app.msgs.mode_debug,
             helptip: app.msgs.helptip_debugMode },
+        hoverToShow: { type: 'toggle', icon: 'anchor', defaultVal: false,
+            label: 'Открывать при наведении',
+            helptip: 'Скрывать интерфейс в правой части экрана, показывать только при наведении' },
         about: { type: 'modal', icon: 'questionMarkCircle',
             label: `${app.msgs.menuLabel_about} ${app.name}...` }
     }})
@@ -504,7 +559,7 @@ if (window !== window.top) return;
 
     window.update = {
 
-        appBottomPos() { app.div.style.bottom = `${ config.minimized ? 55 - app.div.offsetHeight : -7 }px` },
+        appBottomPos() { if (!app.div) return ; app.div.style.bottom = `${ config.minimized ? 55 - app.div.offsetHeight : -7 }px` },
 
         appStyle() { // used in toggle.animations() + update.scheme() + main's app init
             const { scheme: appScheme } = env.ui.app,
@@ -578,8 +633,13 @@ if (window !== window.top) return;
                 #${app.slug} { /* main app div */
                     color: var(--font-color-${appScheme}-scheme) ;
                     background: var(--app-bg-color-${appScheme}-scheme) ;
+                    ${ appScheme == 'dark' ? 'background-image: var(--app-gradient-bg);' : '' }
                     position: sticky ; z-index: 104 ; padding: 17px 26px 16px ; border-radius: 8px ;
                     width: auto ; word-wrap: break-word ; white-space: pre-wrap ;
+                    border: 1px solid ${ appScheme == 'dark' ? 'rgba(255,255,255,0.15)' : 'transparent' } ;
+                    box-shadow: ${ appScheme == 'dark' 
+                        ? '0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2)' 
+                        : 'none' } ;
                     transition: var(--app-transition) ;
                        -webkit-transition: var(--app-transition) ; -moz-transition: var(--app-transition) ;
                        -o-transition: var(--app-transition) ; -ms-transition: var(--app-transition) }
@@ -754,16 +814,15 @@ if (window !== window.top) return;
               // Chatbar styles
              + `#${app.slug}-chatbar {
                     border: solid 1px ${ isParticlizedDS ? '#aaa' : appScheme == 'dark' ? '#777' : '#555' };
-                    border-radius: 12px 13px 12px 0 ; margin: 3px 0 15px 0 ; padding: 15px 60px 12px 15px ;
-                    font-size: 1.1rem ; height: 45px ; max-height: 300px ; resize: none ;
+                    border-radius: 12px 13px 12px 0 ; margin: 3px 0 15px 0 ; padding: 13px 57px 9px 10px ;
+                    font-size: 0.92rem ; height: 60px ; width: 83% ; max-height: 200px ; resize: none ;
                     position: relative ; z-index: 555 ; color: #${ appScheme == 'dark' ? 'eee' : '222' };
                     background: ${ appScheme == 'light' ? '#eeeeee9e'
                         : `#515151${ config.bgAnimationsDisabled ? '' : '9e' }`};
-                    width: 81% !important;
                     ${ appScheme == 'dark' ? '' :
                         `--chatbar-inset-shadow: 0 1px 2px rgba(15,17,17,0.1) inset ;
-                        box-shadow: var(--chatbar-inset-shadow) ; -webkit-box-shadow: var(--chatbar-inset-shadow) ;
-                        -moz-box-shadow: var(--chatbar-inset-shadow) ;` }
+                    box-shadow: var(--chatbar-inset-shadow) ; -webkit-box-shadow: var(--chatbar-inset-shadow) ;
+                    -moz-box-shadow: var(--chatbar-inset-shadow) ;` }
                         transition: box-shadow 0.15s ease ;
                            -webkit-transition: box-shadow 0.15s ease ; -moz-transition: box-shadow 0.15s ease ;
                            -o-transition: box-shadow 0.15s ease ; -ms-transition: box-shadow 0.15s ease }
@@ -857,8 +916,15 @@ if (window !== window.top) return;
               // Sticky Sidebar styles
              + `#${app.slug}.sticky { position: sticky ; top: 14px }
                 #${app.slug}.sticky ~ * { display: none } /* hide sidebar contents */
+                body:has(#${app.slug}.sticky) .chatgpt-modal,
+                body:has(#${app.slug}.sticky) .${app.slug}-menu {
+                    display: block !important;
+                    z-index: 10001 !important;
+                    position: fixed !important;
+                    pointer-events: auto !important;
+                }
                 body:has(#${app.slug}.sticky), div.site-wrapper:has(#${app.slug}.sticky) {
-                    overflow: clip }` // replace `overflow: hidden` to allow stickiness
+                    overflow: visible !important }` // allow modals to show
 
               // Anchor Mode styles
              + `#${app.slug}.anchored {
@@ -881,6 +947,71 @@ if (window !== window.top) return;
                     #${app.slug} *:hover { transform: none !important } /* disable hover fx */
                 }`
 
+              // Hover to show styles
+             + `@keyframes arrow-pulse {
+                    0%, 100% { transform: translateX(0); }
+                    50% { transform: translateX(-5px); }
+                }
+                #${app.slug}-hover-arrow {
+                    position: fixed;
+                    right: 0;
+                    bottom: 200px;
+                    background: var(--app-bg-color-${appScheme}-scheme);
+                    ${ !config.bgAnimationsDisabled ? 'background-image: var(--app-gradient-bg);' : '' }
+                    border: var(--app-border);
+                    border-right: none;
+                    padding: 20px 12px;
+                    border-radius: 16px 0 0 16px;
+                    cursor: pointer;
+                    font-size: 24px;
+                    z-index: 9999;
+                    box-shadow: ${ appScheme == 'dark' 
+                        ? '-4px 0 20px rgba(0,0,0,0.4), 0 4px 15px rgba(0,0,0,0.2)' 
+                        : '-4px 0 20px rgba(0,0,0,0.15), 0 4px 15px rgba(0,0,0,0.1)' };
+                    color: ${ appScheme == 'dark' ? '#fff' : '#333' };
+                    animation: arrow-pulse 2s ease-in-out infinite;
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    align-items: center;
+                    justify-content: center;
+                    min-width: 35px;
+                }
+                #${app.slug}-hover-arrow:hover {
+                    padding-right: 18px;
+                    box-shadow: ${ appScheme == 'dark' 
+                        ? '-6px 0 30px rgba(0,0,0,0.5), 0 6px 25px rgba(0,0,0,0.3)' 
+                        : '-6px 0 30px rgba(0,0,0,0.2), 0 6px 25px rgba(0,0,0,0.15)' };
+                    animation: none;
+                }
+                #${app.slug}-hover-arrow:active {
+                    transform: scale(0.95);
+                }
+                #${app.slug}.hover-hidden {
+                    position: fixed !important;
+                    right: -100% !important;
+                    top: 50% !important;
+                    transform: translateY(-50%) !important;
+                    width: 400px !important;
+                    max-height: 80vh !important;
+                    overflow: auto !important;
+                    z-index: 9998 !important;
+                    transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                }
+                #${app.slug}.hover-visible {
+                    position: fixed !important;
+                    right: 55px !important;
+                    top: 50% !important;
+                    transform: translateY(-50%) !important;
+                    width: 400px !important;
+                    max-height: 80vh !important;
+                    overflow: auto !important;
+                    z-index: 9998 !important;
+                    transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                    border: 1px solid ${ appScheme == 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)' } !important;
+                    box-shadow: ${ appScheme == 'dark' 
+                        ? '-8px 0 40px rgba(0,0,0,0.5), 0 8px 32px rgba(0,0,0,0.3)' 
+                        : '-8px 0 40px rgba(0,0,0,0.15), 0 8px 32px rgba(0,0,0,0.1)' } !important;
+                }`
+
               // Phone styles
              + `@media screen and (max-width: 480px) {
                     #${app.slug} {
@@ -897,6 +1028,7 @@ if (window !== window.top) return;
         },
 
         bylineVisibility() {
+            if (!app.div) return
             if (env.browser.isCompact) return // since byline hidden by app.styles
 
             // Init header elems
@@ -924,9 +1056,12 @@ if (window !== window.top) return;
         },
 
         chatbarWidth() {
+            if (!app.div) return
             const chatbar = app.div.querySelector(`#${app.slug}-chatbar`)
-            if (chatbar) chatbar.style.width = `${
-                config.widerSidebar && !config.anchored ? 85.6 : config.expanded ? 86.9 : 82.6 }%`
+            if (chatbar) {
+                const isDuckDuckGo = location.hostname.includes('duckduckgo')
+                chatbar.style.width = isDuckDuckGo ? '83%' : '100%'
+            }
         },
 
         async footerContent() {
@@ -1032,12 +1167,15 @@ if (window !== window.top) return;
         },
 
         replyPrefix() {
-            const firstP = app.div.querySelector('pre p') ; if (!firstP) return
+            if (!app.div) return
+            const firstP = app.div.querySelector('pre p')
+            if (!firstP) return
             const prefixNeeded = env.ui.app.scheme == 'dark'
-                && !config.bgAnimationsDisabled && !/shuffle|summarize/.test(get.reply.src)
-            const prefixExists = firstP.textContent.startsWith('>> ')
+                && !config.bgAnimationsDisabled && !/shuffle|summarize/.test(get.reply.src || '')
+            const prefixExists = firstP.textContent && firstP.textContent.startsWith('>> ')
             if (prefixNeeded && !prefixExists) firstP.prepend('>> ')
-            else if (!prefixNeeded && prefixExists) firstP.textContent = firstP.textContent.replace(/^>> /, '')
+            else if (!prefixNeeded && prefixExists && firstP.textContent) 
+                firstP.textContent = firstP.textContent.replace(/^>> /, '')
         },
 
         risingParticles() {
@@ -1048,6 +1186,7 @@ if (window !== window.top) return;
         },
 
         rqVisibility() {
+            if (!app.div) return
             const rqsDiv = app.div.querySelector(`.${app.slug}-related-queries`)
             if (rqsDiv) // update visibility based on latest setting
                 rqsDiv.style.display = config.rqDisabled || config.anchored ? 'none' : 'flex'
@@ -1056,7 +1195,26 @@ if (window !== window.top) return;
         scheme(newScheme) {
             env.ui.app.scheme = newScheme ; logos.universalgpt.update() ; update.appStyle()
             update.risingParticles() ; update.replyPrefix() ; modals.settings.updateSchemeStatus()
+            // Update arrow style to match app (update.appStyle already updated CSS)
+            update.arrowStyle()
         }
+    }
+    
+    // Helper function to update arrow style
+    window.update.arrowStyle = function() {
+        if (!app.arrow) return
+        const appScheme = env.ui.app.scheme
+        // Update display based on hoverToShow setting
+        app.arrow.style.display = config.hoverToShow ? 'flex' : 'none'
+        app.arrow.style.visibility = config.hoverToShow ? 'visible' : 'hidden'
+        // Update colors to match current scheme
+        app.arrow.style.background = appScheme == 'dark' ? '#1c1c1c' : 'white'
+        app.arrow.style.color = appScheme == 'dark' ? '#fff' : '#333'
+        app.arrow.style.border = `1px solid ${appScheme == 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`
+        app.arrow.style.borderRight = 'none'
+        app.arrow.style.boxShadow = appScheme == 'dark' 
+            ? '-4px 0 20px rgba(0,0,0,0.4), 0 4px 15px rgba(0,0,0,0.2)' 
+            : '-4px 0 20px rgba(0,0,0,0.15), 0 4px 15px rgba(0,0,0,0.1)'
     }
 
     // Define TOGGLE functions
@@ -1268,6 +1426,27 @@ if (window !== window.top) return;
                 feedback.notify(`${settings.controls.streamingDisabled.label} ${
                                    menus.toolbar.state.words[+!config.streamingDisabled]}`)
             }
+        },
+
+        hoverToShow() {
+            settings.save('hoverToShow', !config.hoverToShow)
+            
+            if (config.hoverToShow) {
+                // Enable hover mode - hide panel, show arrow
+                app.div.classList.add('hover-hidden')
+                app.div.classList.remove('hover-visible')
+            } else {
+                // Disable hover mode - show panel, hide arrow
+                app.div.classList.remove('hover-hidden', 'hover-visible')
+                app.div.style.transform = ''
+            }
+            
+            // Update styles (this will update arrow CSS rules)
+            update.appStyle()
+            // Update arrow display
+            update.arrowStyle()
+            
+            feedback.notify(`Открывать при наведении ${menus.toolbar.state.words[+config.hoverToShow]}`)
         }
     }
 
@@ -1358,7 +1537,7 @@ if (window !== window.top) return;
             let loadingElem
             loadingSpinner.style.cssText = 'position: relative ; top: 1px ; margin-right: 6px'
             if (app.div.querySelector('.reply-pre')) { // reply exists, show where chatbar was
-                if (!/regen|summarize/i.test(src)) rqDiv?.remove() // clear RQs to re-get later
+                if (!/regen|summarize/i.test(src || '')) rqDiv?.remove() // clear RQs to re-get later
                 loadingElem = app.div.querySelector('section')
                 loadingElem.style.margin = `13px 0 ${ rqDiv?.isConnected ? ( env.browser.isFF ? 29 : 37 ) : 0 }px`
                 loadingElem.textContent = app.alerts.waitingResponse
@@ -1519,9 +1698,9 @@ if (window !== window.top) return;
                 return setTimeout(() => show.related(queries), 500, queries)
 
             // Re-get.related() if current reply is question to suggest answers
-            const currentReply = app.div.querySelector(`#${app.slug} .reply-pre`)?.textContent.trim()
-            if (!/shuffle|summarize/i.test(get.reply.src)
-                    && !get.related.replyIsQuestion && /[?？]/.test(currentReply)) {
+            const currentReply = app.div.querySelector(`#${app.slug} .reply-pre`)?.textContent?.trim() || ''
+            if (!/shuffle|summarize/i.test(get.reply.src || '')
+                    && !get.related.replyIsQuestion && /[?？]/.test(currentReply) && currentReply) {
                 log.debug('Re-getting related queries to answer reply question...')
                 get.related.replyIsQuestion = true
                 get.related(currentReply).then(queries => show.related(queries))
@@ -1549,7 +1728,9 @@ if (window !== window.top) return;
                             if (keys.includes(event.key) || keyCodes.includes(event.keyCode) || event.type == 'click') {
                                 event.preventDefault() // prevent scroll on space taps
                                 const chatbar = app.div.querySelector('textarea') ; if (!chatbar) return
-                                const relatedQuery = event.target.textContent ; chatbar.value = relatedQuery
+                                const relatedQuery = event.target.textContent || '' 
+                                if (!relatedQuery) return
+                                chatbar.value = relatedQuery
                                 if (/\[[^[\]]+\]/.test(relatedQuery)) { // highlight 1st bracleted placeholder
                                     chatbar.focus()
                                     ui.addListeners.replySection.chatbarAutoSizer() // since query not auto-sent
@@ -1839,7 +2020,13 @@ if (window !== window.top) return;
                         || ( app.div.offsetHeight < innerHeight - app.div.getBoundingClientRect().top )))
                     // ...or Anchored if AF disabled & user interacted
                     || (config.autoFocusChatbarDisabled && config.anchored && show.reply.userInteracted))
-            ) { app.div.querySelector(`#${app.slug}-chatbar`).focus() ; show.reply.chatbarFocused = true }
+            ) { 
+                const chatbar = app.div.querySelector(`#${app.slug}-chatbar`)
+                if (chatbar) {
+                    chatbar.focus() 
+                    show.reply.chatbarFocused = true 
+                }
+            }
 
             // Update styles
             if (config.anchored) update.appBottomPos() // restore minimized/restored state if anchored
@@ -2860,15 +3047,74 @@ if (window !== window.top) return;
 
     // Create/ID/classify/listenerize/stylize APP container
     app.div = dom.create.elem('div', { id: app.slug, class: 'fade-in' })
+    
+    // Create hover arrow for "hover to show" mode
+    app.arrow = dom.create.elem('div', { id: `${app.slug}-hover-arrow`, textContent: '◀' })
+    // Initial display will be set by update.arrowStyle() after update.appStyle()
+    
+    // Arrow click - toggle visibility
+    app.arrow.addEventListener('click', () => {
+        if (app.div.classList.contains('hover-hidden')) {
+            app.div.classList.remove('hover-hidden')
+            app.div.classList.add('hover-visible')
+        } else {
+            app.div.classList.remove('hover-visible')
+            app.div.classList.add('hover-hidden')
+        }
+    })
+    
+    // Arrow hover - show panel
+    app.arrow.addEventListener('mouseenter', () => {
+        if (config.hoverToShow) {
+            app.div.classList.remove('hover-hidden')
+            app.div.classList.add('hover-visible')
+        }
+    })
+    
+    // Arrow mouse leave - hide panel if not hovering over panel
+    app.arrow.addEventListener('mouseleave', (e) => {
+        if (config.hoverToShow && !app.div.contains(e.relatedTarget)) {
+            setTimeout(() => {
+                app.div.classList.remove('hover-visible')
+                app.div.classList.add('hover-hidden')
+            }, 100) // small delay to prevent flickering
+        }
+    })
+    
+    // Panel mouse leave - hide panel
+    app.div.addEventListener('mouseleave', (e) => {
+        if (config.hoverToShow && !app.arrow.contains(e.relatedTarget)) {
+            setTimeout(() => {
+                app.div.classList.remove('hover-visible')
+                app.div.classList.add('hover-hidden')
+            }, 100) // small delay to prevent flickering
+        }
+    })
+    
     themes.apply(config.theme)
     if (typeof ui !== 'undefined' && ui.addListeners && ui.addListeners.appDiv) {
         ui.addListeners.appDiv()
     }
     ;['anchored', 'expanded', 'sticky', 'wider'].forEach(mode =>
         (config[mode] || config[`${mode}Sidebar`]) && app.div.classList.add(mode))
+    if (config.hoverToShow) app.div.classList.add('hover-hidden')
+    
+    // Apply styles first so CSS variables are available
     update.appStyle()
     ;['rpg', 'rpw'].forEach(cssType => // rising particles
         document.head.append(dom.create.style(GM_getResourceText(`${cssType}CSS`))))
+    
+    // Apply hover-to-show mode if enabled
+    // (hover-hidden class already added above)
+    // Update arrow style (display based on hoverToShow, style from CSS)
+    update.arrowStyle()
+    
+    // Append arrow to body after DOM ready
+    if (document.body) {
+        document.body.appendChild(app.arrow)
+    } else {
+        document.addEventListener('DOMContentLoaded', () => document.body.appendChild(app.arrow))
+    }
 
     // Create/classify/fill feedback FOOTER
     // app.footer = dom.create.elem('footer', { class: 'fade-in anchored-hidden' })
@@ -2878,19 +3124,33 @@ if (window !== window.top) return;
     // Check for active TEXT CAMPAIGNS to replace footer CTA
     // update.footerContent()
 
-    // APPEND YandexGPT + footer to Yandex
+    // FIND parent to APPEND app to
+    try {
+        const parentSelector = currentSite.selector
+        app.divParent = {
+            div: document.querySelector(parentSelector),
+            selector: parentSelector
+        }
+        if (!app.divParent.div) {
+            console.warn(`UniversalGPT: Parent element not found for selector: ${parentSelector}. Using body as fallback.`)
+            app.divParent = { div: document.body, selector: 'body' }
+        }
+    } catch (err) {
+        console.warn(`UniversalGPT: Error finding parent element:`, err)
+        app.divParent = { div: document.body, selector: 'body' }
+    }
+
+    // APPEND app + footer to parent
     app.elems = [app.div] // , app.footer]
     
-    // Add custom style to position panel on right side for all sites
+    // Add custom style to position panel
     const rightPanelStyle = dom.create.style(`
         #${app.slug} {
-            position: fixed !important;
-            top: 100px !important;
-            right: 20px !important;
-            width: 400px !important;
-            max-height: calc(100vh - 120px) !important;
-            z-index: 9999 !important;
-            overflow-y: auto !important;
+            border: var(--app-border);
+            border-radius: 10px;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
         }
         #${app.slug}.wider {
             width: calc(100vw - 850px) !important;
@@ -2906,17 +3166,29 @@ if (window !== window.top) return;
     `)
     document.head.append(rightPanelStyle)
     
-    // For fixed positioning, append directly to body
+    // Append to parent container
     await new Promise(resolve => {
-        if (document.body) {
-            resolve(document.body)
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', resolve)
         } else {
-            new MutationObserver((_, obs) => {
-                if (document.body) { obs.disconnect() ; resolve(document.body) }
-            }).observe(document.documentElement, { childList: true, subtree: true })
+            resolve()
         }
     })
-    document.body.append(...app.elems)
+
+    // Wait for parent container if needed
+    let retryCount = 0
+    while (!app.divParent.div && retryCount < 10) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        app.divParent.div = document.querySelector(app.divParent.selector)
+        retryCount++
+    }
+
+    if (app.divParent.div && app.divParent.div !== document.body) {
+        app.divParent.div.prepend(...app.elems)
+    } else {
+        document.body.append(...app.elems)
+    }
+
     app.elems.forEach((elem, idx) => // fade in staggered
         setTimeout(() => elem.classList.add('active'), idx *550 -200))
 
@@ -2927,7 +3199,16 @@ if (window !== window.top) return;
     }), 1500)
 
     // AUTO-GEN reply or show STANDBY mode
-    app.msgChain = [] ; const searchQuery = new URL(location.href).searchParams.get(currentSite.queryParam)
+    app.msgChain = [] 
+    let searchQuery = ''
+    try {
+        const urlParams = new URL(location.href).searchParams
+        searchQuery = urlParams.get(currentSite.queryParam) || ''
+    } catch (err) {
+        console.warn('UniversalGPT: Error getting search query:', err)
+        searchQuery = ''
+    }
+    
     if (config.autoGet || config.autoSummarize // Auto-Gen on
         || (config.prefixEnabled || config.suffixEnabled) // or Manual-Gen on
             && [config.prefixEnabled && location.href.includes('text=%2F'), // prefix required/present
@@ -2937,12 +3218,12 @@ if (window !== window.top) return;
     ) { // auto-gen reply
         app.msgChain.push({
             time: Date.now(), role: 'user',
-            content: config.autoSummarize ? prompts.create('summarizeResults') : searchQuery
+            content: config.autoSummarize ? prompts.create('summarizeResults') : (searchQuery || 'default query')
         })
         get.reply({ msgs: app.msgChain, src: 'query' })
     } else { // show Standby mode
         show.reply({ standby: true })
-        if (!config.rqDisabled)
+        if (!config.rqDisabled && searchQuery)
             get.related(searchQuery)
                 .then(queries => show.related(queries))
                 .catch(err => { log.error(err.message) ; api.tryNew(get.related) })
@@ -2961,10 +3242,12 @@ if (window !== window.top) return;
 
     // Observe sidebar for need to RAISE DDGPT as other extensions inject into it
     const sidebarObserver = new MutationObserver(() => {
-        if (app.divParent.div.firstChild != app.div) {
+        if (app.divParent && app.divParent.div && app.divParent.div.firstChild != app.div) {
             app.divParent.div.prepend(...app.elems) ; sidebarObserver.disconnect() }
     })
-    sidebarObserver.observe(app.divParent.div, { subtree: true, childList: true })
+    if (app.divParent && app.divParent.div) {
+        sidebarObserver.observe(app.divParent.div, { subtree: true, childList: true })
+    }
     setTimeout(() => sidebarObserver.disconnect(), 5000) // don't observe forever
 
     // Hide ads and unwanted elements
